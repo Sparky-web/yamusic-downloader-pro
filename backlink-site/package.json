@@ -1,0 +1,12 @@
+{
+  "name": "ya-music-backlink",
+  "private": true,
+  "scripts": {
+    "dev": "wrangler dev",
+    "check": "wrangler deploy --dry-run",
+    "deploy": "wrangler deploy"
+  },
+  "devDependencies": {
+    "wrangler": "4.143.1"
+  }
+}
