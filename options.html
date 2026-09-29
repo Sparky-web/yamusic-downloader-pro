@@ -1,59 +1,8 @@
 <!doctype html>
-<html>
-<head>
-  <meta charset="utf-8" />
-  <title>Настройки YM Downloader</title>
-  <style>
-    body {
-      font-family: -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto, Helvetica, Arial, sans-serif;
-      padding: 30px;
-      max-width: 500px;
-      color: #333;
-    }
-    h2 { margin-top: 0; }
-    .note { color: #666; font-size: 14px; margin-bottom: 20px; line-height: 1.5; }
-    .input-group { display: flex; gap: 10px; align-items: center; }
-    input {
-      flex: 1;
-      padding: 8px 12px;
-      font-size: 16px;
-      border: 1px solid #ccc;
-      border-radius: 4px;
-    }
-    button {
-      padding: 8px 20px;
-      font-size: 16px;
-      background: #ffcc00;
-      border: none;
-      border-radius: 4px;
-      cursor: pointer;
-      font-weight: bold;
-    }
-    button:hover { background: #e6b800; }
-    #status {
-      margin-top: 15px;
-      color: green;
-      font-weight: bold;
-      height: 20px;
-    }
-  </style>
-</head>
-<body>
-  <h2>Настройки скачивания</h2>
-  
-  <p class="note">
-    Здесь вы можете указать подпапку внутри вашей стандартной папки загрузок Chrome 
-    (например, внутри <b>D:\1_Downloads\</b>).<br><br>
-    Оставьте поле пустым, чтобы качать в корень папки загрузок.
-  </p>
-
-  <div class="input-group">
-    <input type="text" id="subfolder" placeholder="Например: 1_Music" />
-    <button id="save">Сохранить</button>
-  </div>
-
-  <div id="status"></div>
-
-  <script src="options.js"></script>
-</body>
-</html>
+<html lang="ru"><head><meta charset="utf-8"><title>YaMusic Downloader PRO — Настройки</title><link rel="stylesheet" href="downloads.css"></head>
+<body><main><header><img src="icon.png" alt="" width="42"><h1>YaMusic Downloader PRO</h1></header>
+<section><h2>Сервер BPM и поиска</h2><label for="server-url">Адрес сервера</label><input id="server-url" type="url" placeholder="http://127.0.0.1:8789"><label for="service-token">Токен доступа к серверу</label><input id="service-token" type="password" autocomplete="off"><small>Ключ GetSongBPM хранится в .env.local на сервере. Не вводите его здесь.</small></section>
+<section><h2>Папка загрузок</h2><p>Выберите любую папку в общем центре загрузок.</p><button id="downloads">Открыть центр загрузок</button><p>Для режима «Загрузки Chrome» можно указать подпапку:</p><input id="subfolder" placeholder="1_Music"></section>
+<div class="actions"><button id="save">Сохранить</button><button id="check">Проверить сервер</button></div><p id="status" role="status"></p>
+<footer><a href="https://getsongbpm.com/" target="_blank" rel="noopener">BPM и тональность — GetSongBPM</a></footer>
+</main><script src="config.local.js"></script><script src="dj-api.js"></script><script src="options.js"></script></body></html>

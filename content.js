@@ -120,6 +120,7 @@
     const res = await fetch(`${API_BASE}/tracks/${trackId}`, { credentials: 'include' });
     if (!res.ok) throw new Error(`API Error: ${res.status}`);
     const json = await res.json();
+    if (!json.result?.[0]) throw new Error('Яндекс Музыка не вернула трек');
     _metaCache[trackId] = json.result[0];
     return _metaCache[trackId];
   }
@@ -135,7 +136,7 @@
   // ==================================================================
   // === ЧАСТЬ 3: ЛОГИКА СКАЧИВАНИЯ (ОТПРАВКА В ФОН) ===
   // ==================================================================
-  async function performDownload(trackId, btn = null) {
+  async function performDownload(trackId, btn = null, resolveOnly = false) {
     const isUI = !!btn;
     // Блокируем множественные клики
     if (isUI && btn.dataset.downloading === 'true') return;
@@ -149,6 +150,7 @@
     }
 
     try {
+      const destination = resolveOnly ? null : await chrome.runtime.sendMessage({ type: 'YM_DJ_DESTINATION' });
       const [meta, infoRes] = await Promise.all([
         fetchMeta(trackId),
         fetch(`${API_BASE}/tracks/${trackId}/download-info`, { credentials: 'include' })
@@ -217,17 +219,14 @@
       const yearStr = meta.albums?.length && meta.albums[0].year ? String(meta.albums[0].year) : null;
       const genreStr = meta.albums?.length && meta.albums[0].genre ? String(meta.albums[0].genre) : null;
       
+      const payload = { directUrl, coverUrl, tags: { title: titleStr, artist: artistsStr, album: albumStr, year: yearStr, genre: genreStr }, filename: `${fileName}.mp3` };
+      if (resolveOnly) return payload;
       let resp;
       try {
         // ВАЖНО: Используем строго chrome.runtime.sendMessage для совместимости Chrome и Firefox
         resp = await chrome.runtime.sendMessage({ 
           type: 'YM_DL_BUILD_AND_DOWNLOAD', 
-          payload: { 
-            directUrl: directUrl, 
-            coverUrl: coverUrl,
-            tags: { title: titleStr, artist: artistsStr, album: albumStr, year: yearStr, genre: genreStr },
-            filename: `${fileName}.mp3` 
-          } 
+          payload, destination
         });
       } catch (e) {
         if (e.message.includes('Extension context invalidated')) {
@@ -243,6 +242,7 @@
     } catch (err) {
       console.warn('[YM-DL] Ошибка:', err.message);
       setUI(ST.error);
+      if (!isUI) throw err;
     } finally {
       if (isUI) {
         setTimeout(() => {
@@ -838,4 +838,13 @@
       return true;
     }
   });
+  globalThis.YM_DJ_CORE = { fetchMeta, buildFileName, extractTrackId,
+    resolveAudio: id => performDownload(id, null, true), download: performDownload,
+    async currentId() {
+      const getVisibleEl = selector => [...document.querySelectorAll(selector)].find(el => el.getBoundingClientRect().width > 0);
+      const vibe = getVisibleEl('[class*="VibePlayerBar_root"]');
+      if (vibe) return getExactVibeTrackId(vibe.querySelector('[class*="VibePlayerbarMeta_trackNameText"]')?.textContent.trim() || '', extractArtists(vibe));
+      return extractTrackId(getVisibleEl(SEL.playerBar));
+    }
+  };
 })();

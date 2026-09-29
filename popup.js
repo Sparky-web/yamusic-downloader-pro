@@ -342,3 +342,16 @@ document.addEventListener('DOMContentLoaded', () => {
     document.getElementById('btn-settings').addEventListener('click', () => {
       chrome.runtime.openOptionsPage();
     });
+// DJ controls share the same download destination as the original buttons.
+document.getElementById('dj-downloads').onclick = () => chrome.runtime.sendMessage({ type: 'YM_DJ_OPEN_DOWNLOADS' });
+document.getElementById('dj-versions').onclick = async () => {
+  try {
+    const tabs = await chrome.tabs.query({ url: 'https://music.yandex.ru/*' });
+    const tab = tabs.find(t => t.active) || tabs[0];
+    if (!tab) throw new Error('Откройте Яндекс Музыку');
+    await chrome.tabs.update(tab.id, { active: true });
+    const result = await chrome.tabs.sendMessage(tab.id, { action: 'OPEN_VERSIONS' });
+    if (!result?.ok) throw new Error(result?.error || 'Обновите страницу Яндекс Музыки');
+    window.close();
+  } catch (err) { document.getElementById('dj-status').textContent = err.message; }
+};

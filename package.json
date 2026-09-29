@@ -1,0 +1,17 @@
+{
+  "name": "yamusic-downloader-pro",
+  "private": true,
+  "scripts": {
+    "start": "node --env-file=.env.local server/index.mjs",
+    "configure": "node scripts/setup.mjs",
+    "build:extension": "node scripts/build-extension.mjs",
+    "check": "node scripts/check.mjs",
+    "test": "node --test server/tests/*.test.mjs"
+  },
+  "dependencies": {
+    "essentia.js": "0.1.3"
+  },
+  "engines": {
+    "node": ">=24"
+  }
+}

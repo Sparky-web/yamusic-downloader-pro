@@ -1,3 +1,7 @@
+> **Локальная версия этого форка:** BPM/Camelot, окно версий и общий центр загрузок.
+> Следуйте [инструкции локального запуска](docs/local-development.md). Собирайте расширение командой `pnpm build:extension`.
+> Изменения рассчитаны на Chrome для macOS. Описание ниже относится к исходному проекту.
+
 <div align="center">
 
 # 🎵 YaMusic PRO (Yandex Music Downloader PRO)
