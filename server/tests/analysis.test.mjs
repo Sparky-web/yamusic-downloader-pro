@@ -41,21 +41,31 @@ test('Analysis cannot overwrite catalogue metadata; VK stays manual', async () =
   db.close();
 });
 
-test('Analysis cache survives reopening SQLite and expires after its TTL', async () => {
+test('Analysis persists indefinitely, migrates old entries and supports manual replacement', async () => {
   const directory = await mkdtemp(join(tmpdir(), 'ym-cache-'));
   const path = join(directory, 'cache.sqlite');
   let db;
   try {
     db = new DatabaseSync(path);
     db.exec('CREATE TABLE metadata (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER NOT NULL)');
+    const insert = db.prepare('INSERT INTO metadata VALUES (?, ?, ?)');
+    insert.run('analysis:soundcloud:43', JSON.stringify({ bpm: 90, key: '9A' }), Date.now() - 1);
+    insert.run('analysis:vk:44', JSON.stringify({ bpm: 100, key: '8A' }), Date.now() + 86400000);
     const catalogue = createCatalogue(db, '');
     catalogue.put('analysis:soundcloud:42', { bpm: 128, key: '8A', method: 'analysis' });
-    catalogue.put('analysis:soundcloud:43', { bpm: 90, key: '9A' }, -1);
+    catalogue.put('yandex:expired', { bpm: 120 }, -1);
+    catalogue.put('yandex:current', { bpm: 128 });
     const row = db.prepare('SELECT expires FROM metadata WHERE id = ?').get('analysis:soundcloud:42');
-    assert.ok(Math.abs(row.expires - Date.now() - 30 * 86400000) < 2000);
+    assert.equal(row.expires, 0);
+    assert.equal(db.prepare('SELECT COUNT(*) AS count FROM metadata WHERE id GLOB ? AND expires <> 0').get('analysis:*').count, 0);
+    assert.ok(db.prepare('SELECT expires FROM metadata WHERE id = ?').get('yandex:current').expires > Date.now());
     db.close(); db = new DatabaseSync(path);
     const reopened = createCatalogue(db, '');
     assert.equal(reopened.getAnalysis({ source: 'soundcloud', id: '42' }).key, '8A');
-    assert.equal(reopened.getAnalysis({ source: 'soundcloud', id: '43' }), null);
+    assert.equal(reopened.getAnalysis({ source: 'soundcloud', id: '43' }).key, '9A');
+    assert.equal(reopened.getAnalysis({ source: 'vk', id: '44' }).key, '8A');
+    assert.equal(reopened.get('yandex:expired'), undefined);
+    reopened.put('analysis:soundcloud:42', { bpm: 129, key: '8B' });
+    assert.equal(reopened.getAnalysis({ source: 'soundcloud', id: '42' }).key, '8B');
   } finally { db?.close(); await rm(directory, { force: true, recursive: true }); }
 });
