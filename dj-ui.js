@@ -2,6 +2,8 @@
   'use strict';
   const core = globalThis.YM_DJ_CORE;
   if (!core) return;
+  const presentation = globalThis.YM_DJ_PRESENTATION;
+  if (!presentation) return;
   const memory = new Map(), pending = new Map();
   const names = { yandex: 'Яндекс Музыка', soundcloud: 'SoundCloud', vk: 'VK Музыка' };
   const api = async (path, body) => {
@@ -22,13 +24,12 @@
   }
   const title = track => `${track.title}${track.version ? ` (${track.version})` : ''}`;
   const fileName = track => `${track.artist || 'Unknown Artist'} - ${title(track) || 'Unknown Title'}.mp3`.replace(/[\/\\?%*:|"<>]/g, '_');
-  function label(metadata) {
-    if (!metadata || !metadata.bpm && !metadata.key) return 'BPM / key — нет данных';
-    return `${metadata.approximate ? '≈ ' : ''}${metadata.bpm ? `${metadata.bpmRange?.join('–') || metadata.bpm} BPM` : 'BPM —'} · ${metadata.key || 'key —'}${metadata.uncertain ? ' · проверить' : ''}`;
-  }
+  const label = presentation.label;
+  const renderMetadata = (node, data) => { presentation.render(node, data); node.title = explanation(data); };
+  const metadataStatus = (node, text) => { node.textContent = text; node.removeAttribute('aria-label'); };
   function explanation(metadata) {
     if (!metadata) return 'Можно проанализировать аудио по кнопке.';
-    if (metadata.method === 'analysis') return `${metadata.origin}: ${metadata.seconds} с, ${(metadata.bytes / 1048576).toFixed(1)} МБ. ${metadata.partialTransfer ? 'Загружены фрагменты.' : 'Источник потребовал полный файл.'} Результат приблизительный. BPM может отличаться вдвое.${metadata.disagreement ? ` Каталог показывает ${label(metadata.reference)}. Результаты расходятся.` : ''}`;
+    if (metadata.method === 'analysis') return `${metadata.cached ? 'Сохранённый анализ. ' : ''}${metadata.origin}: ${metadata.seconds} с, ${(metadata.bytes / 1048576).toFixed(1)} МБ. ${metadata.partialTransfer ? 'Загружены фрагменты.' : 'Источник потребовал полный файл.'} Результат приблизительный. BPM может отличаться вдвое.${metadata.disagreement ? ` Каталог показывает ${label(metadata.reference)}. Результаты расходятся.` : ''}`;
     return `${metadata.origin}. Совпали название, исполнитель и версия.${metadata.bpmRange ? ' Разные издания отличаются на 1 BPM.' : ''} Каталог может содержать неточности.`;
   }
   async function lookup(track) {
@@ -45,14 +46,24 @@
     if (track.source === 'vk') return { ...track, directUrl: (await vk('resolve', { track })).directUrl };
     return track;
   }
-  async function analyse(track, update) {
+  async function analyse(track, update, force = false) {
+    const remember = result => {
+      const preferred = result.reference || result;
+      memory.set(key(track), preferred);
+      if (track.source === 'yandex') refreshBadges(track.id, preferred);
+      return result;
+    };
+    if (!force) {
+      update('Проверяем сохранённый анализ…');
+      const cached = await api('/lookup', { track, analysisOnly: true });
+      if (cached.metadata) return remember({ ...cached.metadata, cached: true });
+    }
     update('Получаем аудио…');
-    const job = await api('/analyse', { track: await resolveTrack(track) });
+    const job = await api('/analyse', { track: await resolveTrack(track), force });
     for (let i = 0; i < 300; i++) {
       const state = await api(`/jobs/${job.id}`);
       if (state.status === 'done') {
-        const preferred = state.result.reference || state.result;
-        memory.set(key(track), preferred); refreshBadges(track.id, preferred); return state.result;
+        return remember({ ...state.result, cached: Boolean(state.cached) });
       }
       if (state.status === 'error') throw new Error(state.error);
       update(state.status === 'queued' ? 'Анализ в очереди…' : 'Анализируем фрагмент…');
@@ -78,21 +89,25 @@
   function button(text, action) {
     const node = element('button', text); node.type = 'button'; node.addEventListener('click', action); return node;
   }
-  function close() { cardObserver.disconnect(); host?.remove(); host = null; returnFocus?.focus(); }
+  function close() { cardObserver.disconnect(); presentation.onKeyDown = null; host?.remove(); host = null; returnFocus?.focus(); }
   function refreshBadges(id, metadata) {
-    for (const badge of document.querySelectorAll('.ym-dj-badge')) if (badge.dataset.id === String(id)) { badge.textContent = label(metadata); badge.title = explanation(metadata); }
+    for (const badge of document.querySelectorAll('.ym-dj-badge')) if (badge.dataset.id === String(id)) renderMetadata(badge, metadata);
   }
   function trackCard(track, immediate = false) {
     const card = element('article', '', 'card'), details = element('div', '', 'details');
     const link = element('a', title(track), 'title'); link.href = track.url; link.target = '_blank'; link.rel = 'noopener noreferrer';
     details.append(link, element('div', track.artist, 'artist'));
-    const metadata = element('div', track.source === 'vk' ? 'BPM / key — анализ по кнопке' : 'Получаем BPM / key…', 'metadata');
+    const metadata = element('div', track.source === 'vk' ? 'Анализ по кнопке' : 'Загрузка…', 'metadata');
     const hint = element('div', '', 'hint'), actions = element('div', '', 'actions');
-    const applyMetadata = data => { metadata.textContent = label(data); hint.textContent = explanation(data); };
+    let forceAnalysis = false;
+    const applyMetadata = data => {
+      renderMetadata(metadata, data); hint.textContent = explanation(data);
+      if (data?.method === 'analysis') { forceAnalysis = true; analyseButton.textContent = 'Пересчитать'; }
+    };
     const analyseButton = button('Анализировать', async () => {
       analyseButton.disabled = true;
-      try { applyMetadata(await analyse(track, value => { metadata.textContent = value; })); }
-      catch (err) { metadata.textContent = err.message; }
+      try { applyMetadata(await analyse(track, value => { metadataStatus(metadata, value); }, forceAnalysis)); }
+      catch (err) { metadataStatus(metadata, err.message); }
       finally { analyseButton.disabled = false; }
     });
     const downloadButton = button('Скачать', async () => {
@@ -103,7 +118,7 @@
     });
     actions.append(analyseButton, downloadButton); details.append(metadata, hint); card.append(details, actions);
     if (track.source !== 'vk') {
-      cardLookups.set(card, () => lookup(track).then(applyMetadata).catch(err => { metadata.textContent = 'BPM / key — сервер недоступен'; hint.textContent = err.message; }));
+      cardLookups.set(card, () => lookup(track).then(applyMetadata).catch(err => { metadataStatus(metadata, 'Сервер недоступен'); hint.textContent = err.message; }));
       if (immediate) cardLookups.get(card)(); else cardObserver.observe(card);
     }
     return card;
@@ -123,7 +138,7 @@
     Object.assign(host.style, { position: 'fixed', inset: '0', zIndex: '2147483646' });
     shadow = host.attachShadow({ mode: 'open' });
     const style = element('style'); style.textContent = `
-      :host{font:14px/1.45 system-ui;color:#f5f5f5;color-scheme:dark}.backdrop{position:absolute;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;padding:24px}*{box-sizing:border-box}.dialog{background:#17171c;border:1px solid #42424b;border-radius:18px;max-width:940px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 100px #0009}header{padding:22px 24px 14px;display:flex;justify-content:space-between;align-items:center}h2{margin:0;font-size:22px}h3{font-size:15px;margin:22px 0 9px;color:#fcce42}.body{padding:0 24px 24px;overflow:auto}button,input,select{font:inherit;border:1px solid #474753;border-radius:8px;background:#2a2a33;color:inherit;padding:8px 11px}button{cursor:pointer}button:hover{border-color:#fcce42}button:disabled{opacity:.45;cursor:wait}button.primary{background:#fcce42;color:#131313;border-color:transparent}.search{display:flex;gap:8px;margin:20px 0 8px}.search input{min-width:100px;flex:1}.card{padding:14px;background:#222228;border:1px solid #33333d;border-radius:11px;display:flex;gap:12px;margin:8px 0}.details{flex:1;min-width:0}.title{color:#fff;text-decoration:none;font-weight:600;overflow-wrap:anywhere}.title:hover{text-decoration:underline}.artist{color:#a9a9b5;margin:3px 0 7px}.metadata{color:#fcce42;font-size:13px}.hint,.note{color:#9999a6;font-size:12px;margin-top:5px;overflow-wrap:anywhere}.actions{display:flex;align-items:center;gap:8px}.actions button{font-size:12px}.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0}.error{color:#ffa2a2;font-size:13px}footer{border-top:1px solid #33333b;padding:12px 24px;color:#9999a6;font-size:12px}footer a{color:#fcce42}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fcce42;outline-offset:3px}@media(max-width:620px){.backdrop{padding:8px}.card{flex-direction:column}.search{flex-wrap:wrap}.dialog{max-height:96vh}.body{padding:0 14px 16px}header{padding:16px}.search input{flex-basis:100%}}`;
+      :host{font:14px/1.45 system-ui;color:#f5f5f5;color-scheme:dark}.backdrop{position:absolute;inset:0;background:#000b;display:flex;align-items:center;justify-content:center;padding:24px}*{box-sizing:border-box}.dialog{background:#17171c;border:1px solid #42424b;border-radius:18px;max-width:940px;width:100%;max-height:90vh;display:flex;flex-direction:column;box-shadow:0 24px 100px #0009}header{padding:22px 24px 14px;display:flex;justify-content:space-between;align-items:center}h2{margin:0;font-size:22px}h3{font-size:15px;margin:22px 0 9px;color:#fcce42}.body{padding:0 24px 24px;overflow:auto}button,input,select{font:inherit;border:1px solid #474753;border-radius:8px;background:#2a2a33;color:inherit;padding:8px 11px}button{cursor:pointer}button:hover{border-color:#fcce42}button:disabled{opacity:.45;cursor:wait}button.primary{background:#fcce42;color:#131313;border-color:transparent}.search{display:flex;gap:8px;margin:20px 0 8px}.search input{min-width:100px;flex:1}.card{padding:14px;background:#222228;border:1px solid #33333d;border-radius:11px;display:flex;gap:12px;margin:8px 0}.details{flex:1;min-width:0}.title{color:#fff;text-decoration:none;font-weight:600;overflow-wrap:anywhere}.title:hover{text-decoration:underline}.artist{color:#a9a9b5;margin:3px 0 7px}.metadata{color:#c6ced8;font-size:13px}.hint,.note{color:#9999a6;font-size:12px;margin-top:5px;overflow-wrap:anywhere}.actions{display:flex;align-items:center;gap:8px}.actions button{font-size:12px}.toolbar{display:flex;align-items:center;gap:12px;flex-wrap:wrap;margin:12px 0}.error{color:#ffa2a2;font-size:13px}footer{border-top:1px solid #33333b;padding:12px 24px;color:#9999a6;font-size:12px}footer a{color:#fcce42}a:focus-visible,button:focus-visible,input:focus-visible,select:focus-visible{outline:2px solid #fcce42;outline-offset:3px}@media(max-width:620px){.backdrop{padding:8px}.card{flex-direction:column}.search{flex-wrap:wrap}.dialog{max-height:96vh}.body{padding:0 14px 16px}header{padding:16px}.search input{flex-basis:100%}}`;
     const backdrop = element('div', '', 'backdrop'), dialog = element('section', '', 'dialog');
     dialog.setAttribute('role', 'dialog'); dialog.setAttribute('aria-modal', 'true'); dialog.setAttribute('aria-label', 'Версии трека');
     const header = element('header'); header.append(element('h2', 'Версии трека'), button('Закрыть', close));
@@ -145,7 +160,8 @@
     const footer = element('footer', 'Каталог BPM и тональностей: '), credit = element('a', 'GetSongBPM'); credit.href = 'https://getsongbpm.com/'; credit.target = '_blank'; credit.rel = 'noopener'; footer.append(credit);
     dialog.append(header, body, footer); backdrop.append(dialog); shadow.append(style, backdrop); document.documentElement.append(host);
     backdrop.addEventListener('click', event => { if (event.target === backdrop) close(); });
-    dialog.addEventListener('keydown', event => {
+    presentation.onKeyDown = event => {
+      if (event.isComposing || event.keyCode === 229) return;
       if (event.key === 'Escape') { event.preventDefault(); close(); }
       if (event.key === 'Tab') {
         const focusable = [...dialog.querySelectorAll('button:not(:disabled),input,select,a[href]')];
@@ -153,7 +169,7 @@
         if (event.shiftKey && current === first) { event.preventDefault(); last.focus(); }
         else if (!event.shiftKey && current === last) { event.preventDefault(); first.focus(); }
       }
-    });
+    };
     let searchId = 0;
     form.onsubmit = async event => {
       event?.preventDefault(); const generation = ++searchId;
@@ -183,8 +199,8 @@
     const { badge, id } = badgeQueue.shift(); active++;
     try {
       const track = yandexTrack(await core.fetchMeta(id)), metadata = await lookup(track);
-      if (badge.isConnected && badge.dataset.id === id) { badge.textContent = label(metadata); badge.title = explanation(metadata); }
-    } catch (err) { if (badge.dataset.id === id) { badge.textContent = 'BPM / key —'; badge.title = err.message; } }
+      if (badge.isConnected && badge.dataset.id === id) renderMetadata(badge, metadata);
+    } catch (err) { if (badge.dataset.id === id) { metadataStatus(badge, '—'); badge.title = err.message; } }
     finally { active--; drain(); }
   }
   const observer = new IntersectionObserver(entries => {
@@ -203,10 +219,11 @@
       if (!target || target.closest('a,button')) continue;
       tools = element('span', '', 'ym-dj-tools'); tools.dataset.id = id;
       Object.assign(tools.style, { display: 'inline-flex', gap: '7px', alignItems: 'center', marginLeft: '8px', verticalAlign: 'middle' });
-      const badge = button('BPM / key …', event => { event.preventDefault(); event.stopPropagation(); openVersions(core.extractTrackId(row)).catch(err => alert(err.message)); });
+      const badge = button('…', event => { event.preventDefault(); event.stopPropagation(); openVersions(core.extractTrackId(row)).catch(err => alert(err.message)); });
       badge.className = 'ym-dj-badge'; badge.dataset.id = id;
       const versions = button('Версии', event => { event.preventDefault(); event.stopPropagation(); openVersions(core.extractTrackId(row)).catch(err => alert(err.message)); });
-      for (const control of [badge, versions]) Object.assign(control.style, { color: '#ffcf45', background: '#ffcf4510', font: '11px system-ui', border: '1px solid #ffcf4530', borderRadius: '5px', padding: '3px 6px', cursor: 'pointer', whiteSpace: 'nowrap' });
+      for (const control of [badge, versions]) Object.assign(control.style, { color: '#18212f', background: '#eef2f6', font: '12px system-ui', border: '1px solid #8993a3', borderRadius: '6px', padding: '3px 6px', cursor: 'pointer', whiteSpace: 'nowrap' });
+      badge.style.padding = '2px';
       tools.append(badge, versions); target.append(tools); observer.observe(badge);
     }
   }

@@ -26,7 +26,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg.type === 'YM_DJ_DESTINATION') return destination();
     if (msg.type === 'YM_DJ_OPEN_DOWNLOADS') { await openDownloads(); return { ok: true }; }
     if (msg.type === 'YM_DJ_API') {
-      if (!/^\/(lookup|search|analyse|jobs\/[a-f0-9-]+)$/.test(msg.path)) throw new Error('Недопустимый маршрут');
+      if (!/^\/(track|lookup|search|analyse|jobs\/[a-f0-9-]+)$/.test(msg.path)) throw new Error('Недопустимый маршрут');
       return { ok: true, ...await YM_DJ_API.request(msg.path, msg.body) };
     }
     if (msg.type === 'YM_DJ_VK_REQUEST') return vkRequest(msg.action, msg);

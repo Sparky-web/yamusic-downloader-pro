@@ -51,6 +51,31 @@
     catch { throw new Error('VK запросил вход или изменил ответ. Откройте музыку VK.'); }
   }
   const plain = html => new DOMParser().parseFromString(String(html || ''), 'text/html').body.textContent;
+  function registerTrack(row) {
+    if (!Array.isArray(row) || !/^\d+$/.test(String(row[0])) || !/^-?\d+$/.test(String(row[1]))) throw new Error('Не удалось прочитать трек VK');
+    const hashes = String(row[13] || '').split('/');
+    const track = { source: 'vk', id: `${row[1]}_${row[0]}`, title: plain(row[3]), artist: plain(row[4]), duration: Number(row[5]), url: `https://vk.ru/audio${row[1]}_${row[0]}` };
+    if (tracks.size >= 1000) tracks.delete(tracks.keys().next().value);
+    tracks.set(track.id, { fullId: hashes[2] && hashes[5] ? [row[1], row[0], hashes[2], hashes[5]].join('_') : null, userId: userId(), directUrl: row[2] });
+    return track;
+  }
+  function readElement(element) {
+    const value = element.getAttribute('data-audio') || element.querySelector('[data-audio]')?.getAttribute('data-audio');
+    if (!value) return null;
+    try { return registerTrack(JSON.parse(value)); } catch { return null; }
+  }
+  async function resolveTrack(track) {
+    const cached = tracks.get(track.id);
+    if (!cached) throw new Error('Обновите страницу VK: ссылка на трек устарела');
+    if (!cached.fullId && cached.directUrl) return decodeUrl(cached.directUrl, cached.userId);
+    if (!cached.fullId) throw new Error('VK не предоставил ссылку на этот трек');
+    const response = await chrome.runtime.sendMessage({ type: 'YM_DJ_VK_RELOAD', fullId: cached.fullId });
+    if (!response?.ok) throw new Error(response?.error || 'VK не ответил');
+    const row = response.data.data?.[0]?.find(row => `${row[1]}_${row[0]}` === track.id);
+    if (!row?.[2]) throw new Error('VK не предоставил аудио. Трек может быть недоступен.');
+    return decodeUrl(row[2], cached.userId);
+  }
+  globalThis.YM_DJ_VK_SOURCE = { readElement, resolveTrack };
   chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     if (msg?.type !== 'YM_DJ_VK') return;
     (async () => {
@@ -58,23 +83,11 @@
         const data = await post('/al_audio.php', { al: '1', act: 'section', claim: '0', is_layer: '0', owner_id: String(userId()), section: 'search', q: String(msg.query).slice(0, 300) });
         const list = data.payload?.[1]?.[1]?.playlist?.list;
         if (!Array.isArray(list)) throw new Error('VK не вернул список треков. Проверьте вход; веб-API мог измениться.');
-        const results = list.slice(0, 30).map(row => {
-          const hashes = String(row[13] || '').split('/');
-          const track = { source: 'vk', id: `${row[1]}_${row[0]}`, title: plain(row[3]), artist: plain(row[4]), duration: Number(row[5]), url: `https://vk.ru/audio${row[1]}_${row[0]}` };
-          tracks.set(track.id, { fullId: [row[1], row[0], hashes[2], hashes[5]].join('_'), userId: userId() });
-          return track;
-        });
+        const results = list.slice(0, 30).map(registerTrack);
         return { ok: true, tracks: results };
       }
       if (msg.action === 'resolve') {
-        const cached = tracks.get(msg.track.id);
-        if (!cached) throw new Error('Повторите поиск VK: ссылка устарела');
-        const response = await chrome.runtime.sendMessage({ type: 'YM_DJ_VK_RELOAD', fullId: cached.fullId });
-        if (!response?.ok) throw new Error(response?.error || 'VK не ответил');
-        const data = response.data;
-        const row = data.data?.[0]?.find(row => `${row[1]}_${row[0]}` === msg.track.id);
-        if (!row?.[2]) throw new Error('VK не предоставил аудио. Трек может быть недоступен.');
-        return { ok: true, directUrl: decodeUrl(row[2], cached.userId) };
+        return { ok: true, directUrl: await resolveTrack(msg.track) };
       }
       throw new Error('Неизвестная команда VK');
     })().then(sendResponse, err => sendResponse({ ok: false, error: err.message }));

@@ -31,5 +31,6 @@ export function createCatalogue(db, apiKey) {
     inFlight.set(key, task);
     try { return await task; } finally { inFlight.delete(key); }
   }
-  return { lookup, get, put };
+  const getAnalysis = track => get(`analysis:${cacheKey(track)}`) || null;
+  return { lookup, get, put, getAnalysis };
 }

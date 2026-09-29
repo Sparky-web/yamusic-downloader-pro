@@ -8,7 +8,7 @@ import { Worker } from 'node:worker_threads';
 import { validateTrack, cacheKey } from './music.mjs';
 import { createCatalogue } from './catalogue.mjs';
 import { acquireAudio, validateMediaUrl } from './media.mjs';
-import { searchSoundcloud, resolveSoundcloud } from './soundcloud.mjs';
+import { searchSoundcloud, resolveSoundcloud, getSoundcloudTrack, soundcloudUrl } from './soundcloud.mjs';
 import { run } from './process.mjs';
 
 const token = process.env.SERVICE_TOKEN;
@@ -82,9 +82,14 @@ async function processJob(job, track) {
     inflight.delete(`${job.kind}:${cacheKey(track)}`);
   }
 }
-function enqueue(kind, track) {
+function enqueue(kind, track, force = false) {
   const key = `${kind}:${cacheKey(track)}`;
   if (inflight.has(key)) return jobs.get(inflight.get(key));
+  const cached = kind === 'analysis' && !force && catalogue.getAnalysis(track);
+  if (cached) {
+    const job = { id: randomUUID(), kind, status: 'done', created: Date.now(), cached: true, result: cached };
+    jobs.set(job.id, job); return job;
+  }
   if ([...jobs.values()].filter(j => ['queued', 'running'].includes(j.status)).length >= 12) throw new Error('Очередь заполнена. Дождитесь завершения заданий');
   const job = { id: randomUUID(), kind, status: 'queued', created: Date.now() };
   jobs.set(job.id, job); inflight.set(key, job.id);
@@ -108,7 +113,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' }); res.end(); return;
   }
-  if (req.url === '/health' && req.method === 'GET') return json({ ok: true, name: 'YaMusic Downloader PRO', version: '1.3.0' });
+  if (req.url === '/health' && req.method === 'GET') return json({ ok: true, name: 'YaMusic Downloader PRO', version: '1.4.0' });
   const supplied = Buffer.from(req.headers.authorization?.replace(/^Bearer /, '') || '');
   const expected = Buffer.from(token);
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return json({ error: 'Неверный токен сервера' }, 401);
@@ -127,7 +132,19 @@ const server = createServer(async (req, res) => {
     let size = 0; const parts = [];
     for await (const part of req) { size += part.length; if (size > 32768) return json({ error: 'Запрос слишком большой' }, 413); parts.push(part); }
     const body = JSON.parse(Buffer.concat(parts).toString());
-    if (req.url === '/lookup') return json({ metadata: await catalogue.lookup(validateTrack(body.track)) });
+    if (req.url === '/track') {
+      if (body.source !== 'soundcloud') throw new Error('Этот источник получает метаданные из вкладки');
+      const url = soundcloudUrl(body.url), cacheId = `track:${url}`;
+      const cached = catalogue.get(cacheId);
+      if (cached) return json({ track: cached });
+      const track = await getSoundcloudTrack(url);
+      catalogue.put(cacheId, track, 86400000);
+      return json({ track });
+    }
+    if (req.url === '/lookup') {
+      const track = validateTrack(body.track);
+      return json({ metadata: body.analysisOnly === true ? catalogue.getAnalysis(track) : await catalogue.lookup(track) });
+    }
     if (req.url === '/search') {
       const query = String(body.query || '').trim();
       if (!query || query.length > 300) throw new Error('Неверный поисковый запрос');
@@ -135,7 +152,7 @@ const server = createServer(async (req, res) => {
       searchRunning++;
       try { return json({ tracks: await searchSoundcloud(query) }); } finally { searchRunning--; }
     }
-    if (['/analyse', '/download'].includes(req.url)) return json(publicJob(enqueue(req.url === '/analyse' ? 'analysis' : 'download', validateTrack(body.track))), 202);
+    if (['/analyse', '/download'].includes(req.url)) return json(publicJob(enqueue(req.url === '/analyse' ? 'analysis' : 'download', validateTrack(body.track), body.force === true)), 202);
     json({ error: 'Маршрут не найден' }, 404);
   } catch (err) { json({ error: err instanceof SyntaxError ? 'Неверный JSON' : err.message }, 400); }
 });
