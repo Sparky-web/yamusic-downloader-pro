@@ -7,7 +7,7 @@ export function soundcloudUrl(value) {
   const url = new URL(value);
   if (url.protocol !== 'https:' || url.hostname !== 'soundcloud.com' || url.username || url.password || url.port || !/^\/[^/]+\/[^/]+\/?$/.test(url.pathname)) throw new Error('Нужна ссылка на трек SoundCloud');
   if (['you', 'discover', 'search', 'tags', 'settings', 'stations', 'charts', 'pages', 'artists'].includes(url.pathname.split('/')[1])) throw new Error('Нужна ссылка на трек SoundCloud');
-  return url.origin + url.pathname;
+  return url.origin + url.pathname.replace(/\/$/, '');
 }
 async function trackDetails(value) {
   const url = soundcloudUrl(value), cached = detailsCache.get(url);

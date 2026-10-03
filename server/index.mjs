@@ -113,7 +113,7 @@ const server = createServer(async (req, res) => {
   if (req.method === 'OPTIONS') {
     res.writeHead(204, { 'Access-Control-Allow-Headers': 'Authorization, Content-Type', 'Access-Control-Allow-Methods': 'GET, POST, OPTIONS' }); res.end(); return;
   }
-  if (req.url === '/health' && req.method === 'GET') return json({ ok: true, name: 'YaMusic Downloader PRO', version: '1.4.0' });
+  if (req.url === '/health' && req.method === 'GET') return json({ ok: true, name: 'YaMusic Downloader PRO', version: '1.5.0' });
   const supplied = Buffer.from(req.headers.authorization?.replace(/^Bearer /, '') || '');
   const expected = Buffer.from(token);
   if (supplied.length !== expected.length || !timingSafeEqual(supplied, expected)) return json({ error: 'Неверный токен сервера' }, 401);
@@ -132,12 +132,17 @@ const server = createServer(async (req, res) => {
     let size = 0; const parts = [];
     for await (const part of req) { size += part.length; if (size > 32768) return json({ error: 'Запрос слишком большой' }, 413); parts.push(part); }
     const body = JSON.parse(Buffer.concat(parts).toString());
+    if (req.url === '/cached') {
+      if (!Array.isArray(body.urls) || body.urls.length > 100) throw new Error('Нужно не более 100 ссылок');
+      return json({ metadata: catalogue.soundcloudCached([...new Set(body.urls.map(soundcloudUrl))]) });
+    }
     if (req.url === '/track') {
       if (body.source !== 'soundcloud') throw new Error('Этот источник получает метаданные из вкладки');
       const url = soundcloudUrl(body.url), cacheId = `track:${url}`;
       const cached = catalogue.get(cacheId);
       if (cached) return json({ track: cached });
       const track = await getSoundcloudTrack(url);
+      catalogue.rememberSoundcloud(track);
       catalogue.put(cacheId, track, 86400000);
       return json({ track });
     }
@@ -152,7 +157,11 @@ const server = createServer(async (req, res) => {
       searchRunning++;
       try { return json({ tracks: await searchSoundcloud(query) }); } finally { searchRunning--; }
     }
-    if (['/analyse', '/download'].includes(req.url)) return json(publicJob(enqueue(req.url === '/analyse' ? 'analysis' : 'download', validateTrack(body.track), body.force === true)), 202);
+    if (['/analyse', '/download'].includes(req.url)) {
+      const track = validateTrack(body.track);
+      if (track.source === 'soundcloud') { track.url = soundcloudUrl(track.url); catalogue.rememberSoundcloud(track); }
+      return json(publicJob(enqueue(req.url === '/analyse' ? 'analysis' : 'download', track, body.force === true)), 202);
+    }
     json({ error: 'Маршрут не найден' }, 404);
   } catch (err) { json({ error: err instanceof SyntaxError ? 'Неверный JSON' : err.message }, 400); }
 });

@@ -69,3 +69,19 @@ test('Analysis persists indefinitely, migrates old entries and supports manual r
     assert.equal(reopened.getAnalysis({ source: 'soundcloud', id: '42' }).key, '8B');
   } finally { db?.close(); await rm(directory, { force: true, recursive: true }); }
 });
+
+test('SoundCloud URL cache restores old identities and separates remixes without remote requests', () => {
+  const db = new DatabaseSync(':memory:');
+  db.exec('CREATE TABLE metadata (id TEXT PRIMARY KEY, value TEXT NOT NULL, expires INTEGER NOT NULL)');
+  const url = 'https://soundcloud.com/artist/original';
+  db.prepare('INSERT INTO metadata VALUES (?, ?, ?)').run(`track:${url}`, JSON.stringify({ source: 'soundcloud', id: '42', url }), 1);
+  const catalogue = createCatalogue(db, '');
+  catalogue.put('analysis:soundcloud:42', { bpm: 128, key: '4A' });
+  const remix = 'https://soundcloud.com/artist/remix';
+  catalogue.rememberSoundcloud({ source: 'soundcloud', id: '43', url: remix + '?in=playlist' });
+  assert.equal(catalogue.soundcloudCached([url, remix])[url].key, '4A');
+  assert.equal(catalogue.soundcloudCached([url, remix])[remix], null);
+  catalogue.put('analysis:soundcloud:43', { bpm: 90, key: '8B' });
+  assert.equal(catalogue.soundcloudCached([remix])[remix].key, '8B');
+  db.close();
+});

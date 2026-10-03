@@ -10,7 +10,7 @@ globalThis.YM_DJ_API = {
   },
   async request(path, body, binary = false) {
     const config = await this.config();
-    if (!/^\/(track|lookup|search|analyse|download|health|jobs\/[a-f0-9-]+|files\/[a-f0-9-]+)$/.test(path)) throw new Error('Недопустимый маршрут');
+    if (!/^\/(cached|track|lookup|search|analyse|download|health|jobs\/[a-f0-9-]+|files\/[a-f0-9-]+)$/.test(path)) throw new Error('Недопустимый маршрут');
     let response;
     try {
       response = await fetch(config.url + path, { method: body === undefined ? 'GET' : 'POST',

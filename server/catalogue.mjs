@@ -1,6 +1,17 @@
 import { selectCatalogueMatch, fullTitle, camelot, cacheKey, normalize } from './music.mjs';
 
 export function createCatalogue(db, apiKey) {
+  db.exec('CREATE TABLE IF NOT EXISTS soundcloud_tracks (url TEXT PRIMARY KEY, track_id TEXT NOT NULL)');
+  const rememberSoundcloud = track => {
+    if (track.source === 'soundcloud' && /^\d+$/.test(String(track.id)) && track.url) {
+      const url = new URL(track.url); url.search = ''; url.hash = '';
+      db.prepare('INSERT OR REPLACE INTO soundcloud_tracks VALUES (?, ?)').run(url.href.replace(/\/$/, ''), String(track.id));
+    }
+  };
+  // Backfill the URL index from previously resolved tracks, including expired identity records.
+  for (const row of db.prepare("SELECT value FROM metadata WHERE id GLOB 'track:https://soundcloud.com/*'").all()) {
+    try { rememberSoundcloud(JSON.parse(row.value)); } catch { /* Ignore malformed legacy identity records. */ }
+  }
   // Zero means permanent. Preserve older analyses, including those whose TTL has passed.
   db.prepare("UPDATE metadata SET expires = 0 WHERE id GLOB 'analysis:*' AND expires <> 0").run();
   let nextRequest = Promise.resolve();
@@ -34,5 +45,9 @@ export function createCatalogue(db, apiKey) {
     try { return await task; } finally { inFlight.delete(key); }
   }
   const getAnalysis = track => get(`analysis:${cacheKey(track)}`) || null;
-  return { lookup, get, put, getAnalysis };
+  const soundcloudCached = urls => Object.fromEntries(urls.map(url => {
+    const row = db.prepare('SELECT track_id FROM soundcloud_tracks WHERE url = ?').get(url);
+    return [url, row ? getAnalysis({ source: 'soundcloud', id: row.track_id }) : null];
+  }));
+  return { lookup, get, put, getAnalysis, rememberSoundcloud, soundcloudCached };
 }
