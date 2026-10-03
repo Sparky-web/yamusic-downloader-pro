@@ -1,8 +1,8 @@
 {
   "manifest_version": 3,
   "name": "YaMusic Downloader PRO",
-  "version": "1.2.0",
-  "description": "Скачивание MP3 (320kbps) с правильными именами и API-управление лайками.",
+  "version": "1.5.0",
+  "description": "Скачивание треков, BPM и Camelot key, поиск версий в Яндекс Музыке, VK и SoundCloud.",
   "permissions": [
     "downloads",
     "storage",
@@ -11,11 +11,18 @@
   ],
   "host_permissions": [
     "https://*.yandex.ru/*",
-    "https://*.yandex.net/*"
+    "https://*.yandex.net/*",
+    "http://127.0.0.1:8789/*",
+    "http://localhost:8789/*",
+    "https://soundcloud.com/*",
+    "https://*.vk.ru/*",
+    "https://*.vk.com/*",
+    "https://*.vkuseraudio.net/*",
+    "https://*.vkuseraudio.com/*",
+    "https://*.userapi.com/*"
   ],
   "background": {
-    "service_worker": "background.js",
-    "scripts": ["background.js"]
+    "service_worker": "background.js"
   },
   "action": {
     "default_popup": "popup.html",
@@ -24,18 +31,53 @@
   "options_page": "options.html",
   "content_scripts": [
     {
+      "matches": ["https://music.yandex.ru/*", "https://soundcloud.com/*"],
+      "js": ["dj-presentation.js"],
+      "run_at": "document_start",
+      "all_frames": true
+    },
+    {
       "matches": [
         "https://music.yandex.ru/",
         "https://music.yandex.ru/*"
       ],
-      "js": ["button-config.js", "content.js"],
+      "js": [
+        "button-config.js",
+        "content.js",
+        "dj-ui.js"
+      ],
+      "run_at": "document_idle"
+    },
+    {
+      "matches": [
+        "https://vk.ru/*",
+        "https://vk.com/*",
+        "https://m.vk.ru/*",
+        "https://m.vk.com/*"
+      ],
+      "js": [
+        "dj-presentation.js",
+        "vk-content.js",
+        "source-ui.js"
+      ],
+      "all_frames": true,
+      "run_at": "document_idle"
+    },
+    {
+      "matches": ["https://soundcloud.com/*"],
+      "js": ["source-ui.js"],
+      "all_frames": true,
       "run_at": "document_idle"
     }
   ],
   "web_accessible_resources": [
     {
-      "resources": ["vibe-interceptor.js"],
-      "matches": ["https://music.yandex.ru/*"]
+      "resources": [
+        "vibe-interceptor.js"
+      ],
+      "matches": [
+        "https://music.yandex.ru/*"
+      ]
     }
   ],
   "icons": {
@@ -46,8 +88,13 @@
       "id": "yamusicpro@kernelpace.github.io",
       "strict_min_version": "128.0",
       "data_collection_permissions": {
-        "required": ["none"]
+        "required": [
+          "none"
+        ]
       }
     }
-  }
+  },
+  "optional_host_permissions": [
+    "https://*/*"
+  ]
 }

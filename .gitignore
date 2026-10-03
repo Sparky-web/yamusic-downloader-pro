@@ -6,3 +6,5 @@ node_modules/
 .wrangler/
 .local/
 .DS_Store
+config.local.js
+server/data/
